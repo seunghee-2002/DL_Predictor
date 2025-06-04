@@ -25,7 +25,6 @@ class OrderPredictorModel(nn.Module):
                       kernel_size=cnn_kernel_size, # 인자로 받은 커널 크기 사용
                       padding=(cnn_kernel_size - 1) // 2), # 커널 크기에 따른 동적 패딩
             nn.ReLU(),
-            nn.Dropout(dropout_rate), # 드롭아웃 레이어 추가
             nn.AdaptiveMaxPool1d(output_size=1) # 각 주문의 제품 시퀀스를 단일 벡터로 압축
         )
 
@@ -47,7 +46,7 @@ class OrderPredictorModel(nn.Module):
         )
 
     def forward(self, x):
-        # x shape: (batch_size, N_orders, max_products_per_order, product_emb_dim)
+        # x shape: (batch_size, N_orders, max_products_per_order(145), product_emb_dim(64))
         batch_size, N_orders, max_products_per_order, _ = x.shape
 
         # CNN 입력을 위해 (batch_size * N_orders, max_products_per_order, product_emb_dim) 형태로 변환

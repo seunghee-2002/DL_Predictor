@@ -1,1 +1,5 @@
 DLResource/
+학습기록.txt
+Loss.txt
+models/
+__pycache__

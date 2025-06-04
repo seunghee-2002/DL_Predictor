@@ -9,7 +9,7 @@ import os
 import argparse
 import numpy as np
 import pandas as pd
-import torchmetrics # torchmetrics 임포트
+import torchmetrics
 
 def get_device():
     """CUDA 사용 가능 시 GPU, 아닐 경우 CPU 장치를 반환합니다."""
@@ -43,7 +43,6 @@ def load_model(model_architecture_instance, path, device):
 
 
 def initialize_metrics(num_classes, device, top_k_list=[10, 20], threshold=0.1): # threshold 인자 추가 및 기본값 설정
-    print(f"알림: 평가지표가 threshold={threshold} 로 초기화됩니다.") # 확인용 로그 추가
     metrics = {
         'F1_micro_overall': torchmetrics.F1Score(task="multilabel", num_labels=num_classes, average='micro', threshold=threshold).to(device),
         'F1_macro': torchmetrics.F1Score(task="multilabel", num_labels=num_classes, average='macro', threshold=threshold).to(device),
@@ -189,21 +188,24 @@ def main():
     parser.add_argument("--max_products_per_order", type=int, default=145, help="주문 당 최대 제품 수")
     parser.add_argument("--product_emb_dim", type=int, default=64, help="제품 임베딩 차원")
     # 하이퍼파라미터
-    parser.add_argument("--cnn_out_channels", type=int, default=256, help="CNN 출력 채널 수")
-    parser.add_argument("--cnn_kernel_size", type=int, default=5, help="CNN 커널 크기")
+    # CNN
+    parser.add_argument("--cnn_out_channels", type=int, default=128, help="CNN 출력 채널 수")
+    parser.add_argument("--cnn_kernel_size", type=int, default=3, help="CNN 커널 크기") # 연속된 제품간 관계를 보는 단위
+    # GRU
     parser.add_argument("--gru_hidden_dim", type=int, default=512, help="GRU 은닉 상태 차원")
     parser.add_argument("--gru_layers", type=int, default=2, help="GRU 계층 수")
     parser.add_argument("--dropout_rate", type=float, default=0.1, help="드롭아웃 비율")
+    # FC
     parser.add_argument("--prediction_head_inter_dim", type=int, default=256, help="예측 헤드 중간 차원")
     # 학습 관련 인자
     parser.add_argument("--learning_rate", type=float, default=0.001, help="학습률")
     parser.add_argument("--batch_size", type=int, default=32, help="배치 크기")
-    parser.add_argument("--num_epochs", type=int, default=0, help="에포크 수")
+    parser.add_argument("--num_epochs", type=int, default=20, help="에포크 수")
     parser.add_argument("--early_stopping_patience", type=int, default=10, help="Early stopping을 위한 patience 값")
-    parser.add_argument("--metrics_threshold", type=float, default=0.1, help="평가지표 계산 시 사용할 확률 임계값")
-    # pos_weight() 관련
+    parser.add_argument("--metrics_threshold", type=float, default=0.4, help="평가지표 계산 시 사용할 확률 임계값")
+    # pos_weight(제품을 예측 성공했을때 가중치) 관련
     parser.add_argument("--calculate_pos_weight_dynamically",default=False, help="학습 데이터셋에서 pos_weight 동적 계산 여부(manual_pos_weight가 우선)")
-    parser.add_argument("--manual_pos_weight", type=float, default=100, help="BCEWithLogitsLoss에 수동으로 설정할 pos_weight 값 (예: 100.0)")
+    parser.add_argument("--manual_pos_weight", type=float, default=10, help="BCEWithLogitsLoss에 수동으로 설정할 pos_weight 값 (예: 100.0)")
     # 데이터 분할 관련
     parser.add_argument("--train_ratio", type=float, default=0.6, help="학습 세트 비율")
     parser.add_argument("--val_ratio", type=float, default=0.2, help="검증 세트 비율")
@@ -213,9 +215,6 @@ def main():
     parser.add_argument("--seed", type=int, default=42, help="랜덤 시드")
 
     args = parser.parse_args()
-
-    if not (0 < args.train_ratio < 1 and 0 < args.val_ratio < 1 and (args.train_ratio + args.val_ratio) < 1):
-        raise ValueError("train_ratio와 val_ratio는 0과 1 사이여야 하며, 이들의 합도 1보다 작아야 합니다.")
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
@@ -251,9 +250,6 @@ def main():
     train_samples = int(args.train_ratio * total_samples)
     val_samples = int(args.val_ratio * total_samples)
     test_samples = total_samples - train_samples - val_samples
-
-    if train_samples <= 0 or val_samples <= 0 or test_samples <= 0:
-        raise ValueError(f"데이터셋 크기가 너무 작거나 분할 비율이 잘못되어 하나 이상의 세트(학습:{train_samples}, 검증:{val_samples}, 테스트:{test_samples})가 0개 또는 음수의 샘플을 갖게 됩니다.")
 
     print(f"데이터셋 분할: 총 {total_samples}개 -> 학습 {train_samples}개, 검증 {val_samples}개, 테스트 {test_samples}개")
     
@@ -310,11 +306,7 @@ def main():
     else:
         criterion = nn.BCEWithLogitsLoss()
         print("BCEWithLogitsLoss 기본 설정 사용 (pos_weight 없음).")
-        
     optimizer = optim.Adam(model.parameters(), lr=args.learning_rate)
-    
-    print("옵티마이저 초기화 완료.")
-    
     print("손실 함수 (BCEWithLogitsLoss) 및 옵티마이저 초기화 완료.")
 
     print("모델 학습 시작...")
