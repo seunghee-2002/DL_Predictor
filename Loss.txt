@@ -45,3 +45,9 @@ threshold 실험
 최종 테스트 세트 손실: 0.2456, 테스트 지표: [F1_micro_overall: 0.0013, F1_macro: 0.0005, Precision@10: 0.0006, Recall@10: 0.9741, Precision@20: 0.0006, Recall@20: 0.9741]
 0.15
 최종 테스트 세트 손실: 0.2456, 테스트 지표: [F1_micro_overall: 0.0013, F1_macro: 0.0005, Precision@10: 0.0006, Recall@10: 0.9741, Precision@20: 0.0006, Recall@20: 0.9741]
+
+cnn_kernelsize = 5
+최종 테스트 세트 손실: 0.0091, 테스트 지표: [F1_micro_overall: 0.1130, F1_macro: 0.0004, Precision@10: 0.1351, Recall@10: 0.0971, Precision@20: 0.1351, Recall@20: 0.0971] 
+cnn_kernelsize = 4
+모델 가중치 로드 완료: ./models\cnn_gru_cnn.pth
+최종 테스트 세트 손실: 0.0089, 테스트 지표: [F1_micro_overall: 0.1297, F1_macro: 0.0009, Precision@10: 0.1386, Recall@10: 0.1219, Precision@20: 0.1386, Recall@20: 0.1219]

@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import argparse
 import os
-from model import OrderPredictorModel  # 모델 정의가 포함된 파일에서 OrderPredictorModel 클래스를 가져옵니다.
+from model_cnn import CNNPredictorModel
 
 def get_device():
     """CUDA 사용 가능 시 GPU, 아닐 경우 CPU 장치를 반환합니다."""
@@ -112,18 +112,17 @@ def main():
     # 학습 시 설정과 일치시켜야 하는 주요 하이퍼파라미터들
     parser.add_argument("--cnn_out_channels", type=int, default=128, help="CNN 출력 채널 수") # 학습 시 값으로 변경 (예: 256)
     parser.add_argument("--cnn_kernel_size", type=int, default=3, help="CNN 커널 크기") # 학습 시 값으로 변경 (예: 5)
-    parser.add_argument("--gru_hidden_dim", type=int, default=256, help="GRU 은닉 상태 차원") # 학습 시 값으로 변경 (예: 512)
-    parser.add_argument("--gru_layers", type=int, default=1, help="GRU 계층 수") # 학습 시 값으로 변경 (예: 2)
+    parser.add_argument("--gru_hidden_dim", type=int, default=512, help="GRU 은닉 상태 차원") # 학습 시 값으로 변경 (예: 512)
+    parser.add_argument("--gru_layers", type=int, default=2, help="GRU 계층 수") # 학습 시 값으로 변경 (예: 2)
     parser.add_argument("--dropout_rate", type=float, default=0.1, help="모델 내 드롭아웃 비율") # 학습 시 값으로 변경
-    parser.add_argument("--prediction_head_inter_dim", type=int, default=128, help="예측 헤드 중간 차원") # 학습 시 값으로 변경 (예: 256)
+    parser.add_argument("--prediction_head_inter_dim", type=int, default=256, help="예측 헤드 중간 차원") # 학습 시 값으로 변경 (예: 256)
 
-    parser.add_argument("--candidate_pool_size", type=int, default=145, help="확률 상위 N개 후보군 크기")
+    parser.add_argument("--candidate_pool_size", type=int, default=10, help="확률 상위 N개 후보군 크기")
     parser.add_argument("--probability_threshold", type=float, default=0.1, help="제품 선택 확률 임계값")
 
     args = parser.parse_args()
     device = get_device()
 
-    # ... (데이터 로드 부분은 동일) ...
     print("데이터 로드 중...")
     if not os.path.exists(args.products_path):
         print(f"오류: 제품 파일({args.products_path})을 찾을 수 없습니다.")
@@ -139,15 +138,6 @@ def main():
     # 임베딩 파일 행 수와 products.csv 제품 수 비교 (조정)
     if product_embeddings_all_np.shape[0] == num_total_products + 1:
         print(f"알림: 임베딩 파일에 제품 수보다 1개 많은 행이 있습니다. 첫 번째 행을 패딩/UNK용으로 간주하고 실제 제품 임베딩을 사용합니다.")
-        # 이 경우 product_id_to_idx_map에서 생성된 인덱스를 그대로 사용하면 되지만, 
-        # 만약 product_embeddings_all_np[0]이 패딩이고 실제 product_id 1이 emb_idx 1에 매핑된다면
-        # custom_dataset.py 와 동일한 로직으로 product_id_to_idx_map을 사용해야 합니다.
-        # 현재 custom_dataset.py는 product_id를 0부터 시작하는 인덱스로 매핑합니다.
-        # ev_final64.npy가 (49689, 64)이고 products.csv가 49688개라면,
-        # product_id_to_idx_map의 결과 emb_idx가 0~49687 범위일 것이고, 
-        # product_embeddings_all_np[emb_idx] 접근은 문제가 없습니다.
-        # 만약 product_embeddings_all_np[0]이 특별한 의미라면, product_id_to_idx_map이 이를 반영해야 합니다.
-        # 여기서는 product_id_to_idx_map이 0-based 인덱스를 products.csv의 product_id에 직접 매핑한다고 가정합니다.
         pass # 특별한 처리 없이 진행, 단, product_id_to_idx_map이 0부터 시작하는 올바른 인덱스를 제공해야 함
     elif product_embeddings_all_np.shape[0] != num_total_products:
          print(f"경고: 임베딩 파일 행 수({product_embeddings_all_np.shape[0]})와 products.csv 제품 수({num_total_products})가 일치하지 않아 문제 발생 가능성이 있습니다.")
@@ -162,7 +152,7 @@ def main():
 
     # --- 2. 모델 로드 ---
     print("모델 초기화 및 가중치 로드 중...")
-    model = OrderPredictorModel(
+    model = CNNPredictorModel(
         num_total_products=num_total_products,
         product_emb_dim=args.product_emb_dim,
         cnn_out_channels=args.cnn_out_channels,
