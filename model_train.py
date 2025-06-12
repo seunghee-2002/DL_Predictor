@@ -3,6 +3,7 @@ import torch.optim as optim
 import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
+
 from custom_dataset import OrderSequenceDataset, custom_collate_fn
 # from model_attention import AttentionPredictorModel
 from model_cnn import CNNPredictorModel
@@ -12,6 +13,9 @@ import argparse
 import numpy as np
 import pandas as pd
 import torchmetrics
+import matplotlib.pyplot as plt
+import csv
+
 
 def get_device():
     if torch.cuda.is_available():
@@ -94,7 +98,7 @@ def evaluate_model(model, data_loader, criterion, device, metrics_dict, desc="[�
 def train_model(model, train_loader, val_loader, test_loader, optimizer, criterion, num_epochs, device, 
                 model_save_path, model_save_name, args_for_reload, num_total_products_for_reload, 
                 order_meta_dim, early_stopping_patience=10, metrics_threshold_to_use=0.1):
-    best_val_loss = float('inf')
+    best_val_f1_micro = 0.0
     epochs_no_improve = 0 
     metrics_val = initialize_metrics(num_total_products_for_reload, device, threshold=metrics_threshold_to_use)
     metrics_test = initialize_metrics(num_total_products_for_reload, device, threshold=metrics_threshold_to_use)
@@ -104,6 +108,13 @@ def train_model(model, train_loader, val_loader, test_loader, optimizer, criteri
         print(f"디렉토리 생성: {model_save_path}")
 
     full_model_path = os.path.join(model_save_path, model_save_name)
+    log_path = os.path.join(model_save_path, model_save_name.replace('.pth', '') + "_train_log.csv")
+    log_header = ["val_f1_micro", "val_precision@10", "val_recall@10"]
+
+    if not os.path.exists(log_path):
+        with open(log_path, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(log_header)
 
     for epoch in range(num_epochs):
         model.train()
@@ -120,25 +131,41 @@ def train_model(model, train_loader, val_loader, test_loader, optimizer, criteri
             optimizer.step()
             running_train_loss += loss.item() * products_x.size(0)
             train_progress_bar.set_postfix(loss=loss.item())
+
         epoch_train_loss = running_train_loss / len(train_loader.dataset)
-        epoch_val_loss, val_metrics_results = evaluate_model(model, val_loader, criterion, device, metrics_val, desc=f"Epoch {epoch+1}/{num_epochs} [검증]")
+        epoch_val_loss, val_metrics_results = evaluate_model(
+            model, val_loader, criterion, device, metrics_val, desc=f"Epoch {epoch+1}/{num_epochs} [검증]"
+        )
+
+        val_f1_micro = val_metrics_results.get("F1_micro_overall", 0.0)
+        val_precision10 = val_metrics_results.get("Precision@10", 0.0)
+        val_recall10 = val_metrics_results.get("Recall@10", 0.0)
         metrics_log_str = ", ".join([f"{name}: {value:.4f}" for name, value in val_metrics_results.items()])
         print(f"Epoch {epoch+1}/{num_epochs}, 학습 손실: {epoch_train_loss:.4f}, 검증 손실: {epoch_val_loss:.4f}, 검증 지표: [{metrics_log_str}]")
-        if epoch_val_loss < best_val_loss:
-            best_val_loss = epoch_val_loss
+
+        with open(log_path, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                round(val_f1_micro, 4),
+                round(val_precision10, 4),
+                round(val_recall10, 4)
+            ])
+
+        if val_f1_micro > best_val_f1_micro:
+            best_val_f1_micro = val_f1_micro
             save_model(model, full_model_path)
-            print(f"검증 손실 개선: {best_val_loss:.4f}. 모델 저장됨: {full_model_path}")
-            epochs_no_improve = 0 
+            print(f"검증 F1-micro 개선: {best_val_f1_micro:.4f}. 모델 저장됨: {full_model_path}")
+            epochs_no_improve = 0
         else:
             epochs_no_improve += 1
-            print(f"검증 손실 개선 없음. ({epochs_no_improve}/{early_stopping_patience})")
+            print(f"검증 F1-micro 개선 없음. ({epochs_no_improve}/{early_stopping_patience})")
 
         if epochs_no_improve >= early_stopping_patience:
-            print(f"{early_stopping_patience} 에포크 동안 검증 손실 개선 없어 학습 조기 종료.")
-            break 
-    
+            print(f"{early_stopping_patience} 에포크 동안 F1-micro 개선 없어 학습 조기 종료.")
+            break
+
     print("학습 완료.")
-    print(f"최적 검증 손실: {best_val_loss:.4f}")
+    print(f"최고 F1-micro: {best_val_f1_micro:.4f}")
     print(f"최적 모델은 {full_model_path} 에 저장되었습니다.")
 
     if os.path.exists(full_model_path):
@@ -174,6 +201,28 @@ def train_model(model, train_loader, val_loader, test_loader, optimizer, criteri
         print(f"최종 테스트 세트 손실: {test_loss:.4f}, 테스트 지표: [{test_metrics_log_str}]")
     else:
         print(f"오류: 최적 모델 파일({full_model_path})을 찾을 수 없어 테스트 평가를 스킵합니다.")
+    # 학습 완료 후 로그 시각화
+    plot_training_log(log_path)
+
+def plot_training_log(log_path):
+    if not os.path.exists(log_path):
+        print(f"[Log not found] {log_path}")
+        return
+
+    df = pd.read_csv(log_path)
+    plt.figure(figsize=(8, 5))
+    plt.plot(df.index + 1, df["val_f1_micro"], label="Val F1-micro", marker='o')
+    plt.plot(df.index + 1, df["val_precision@10"], label="Val Precision@10", linestyle='--')
+    plt.plot(df.index + 1, df["val_recall@10"], label="Val Recall@10", linestyle='--')
+    plt.xlabel("Epoch")
+    plt.ylabel("Score")
+    plt.title("Validation Metrics Over Epochs")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(log_path.replace(".csv", ".png"))
+    plt.show()
+
 
 def main():
     parser = argparse.ArgumentParser(description="Attention/CNN-ProductSequence 모델 학습 스크립트")
@@ -181,32 +230,33 @@ def main():
     parser.add_argument("--data_x_product_path", type=str, default="./DLResource/PreprocessData/data_X_product_5.csv", help="전체 X_product_N.csv 파일 경로")
     parser.add_argument("--data_x_meta_path", type=str, default="./DLResource/PreprocessData/data_X_5.csv", help="주문 헤더 feature 데이터 경로")
     parser.add_argument("--data_y_path", type=str, default="./DLResource/PreprocessData/data_Y_5.csv", help="전체 Y_N.csv 파일 경로")
-    parser.add_argument("--embeddings_path", type=str, default="./DLResource/ev_final32.npy", help="제품 임베딩 파일 경로")
+    parser.add_argument("--embeddings_path", type=str, default="./DLResource/ev_final64.npy", help="제품 임베딩 파일 경로")
     parser.add_argument("--products_path", type=str, default="./DLResource/RawData/products.csv", help="제품 메타데이터 파일 경로")
     # 데이터 인자 설정
     parser.add_argument("--N_orders", type=int, default=5, help="주문 시퀀스 길이")
     parser.add_argument("--max_products_per_order", type=int, default=145, help="주문당 최대 제품 수")
-    parser.add_argument("--product_emb_dim", type=int, default=32, help="제품 임베딩 차원")
+    parser.add_argument("--product_emb_dim", type=int, default=64, help="제품 임베딩 차원")
     # CNN
     parser.add_argument("--cnn_out_channels", type=int, default=128, help="CNN 출력 차원")
     parser.add_argument("--cnn_kernel_size", type=int, default=4, help="CNN 커널 크기")
+    parser.add_argument("--cnn_pool_size", type=int, default=8, help="CNN 풀 크기")
     # Attention
     parser.add_argument("--attn_out_dim", type=int, default=128, help="Attention 출력 차원")
     parser.add_argument("--attn_heads", type=int, default=4, help="Attention 헤드 수")
-    parser.add_argument("--attn_layers", type=int, default=1, help="Attention block 층 수")
+    parser.add_argument("--attn_layers", type=int, default=2, help="Attention block 층 수")
     # GRU
     parser.add_argument("--gru_hidden_dim", type=int, default=256, help="GRU 은닉 상태 차원")
     parser.add_argument("--gru_layers", type=int, default=2, help="GRU 계층 수")
-    parser.add_argument("--dropout_rate", type=float, default=0.1, help="드롭아웃 비율")
+    parser.add_argument("--dropout_rate", type=float, default=0.2, help="드롭아웃 비율")
     # FC
     parser.add_argument("--prediction_head_inter_dim", type=int, default=256, help="예측 헤드 중간 차원")
     # 학습 관련 인자
     parser.add_argument("--learning_rate", type=float, default=0.001, help="학습률")
-    parser.add_argument("--batch_size", type=int, default=32, help="배치 크기")
-    parser.add_argument("--num_epochs", type=int, default=20, help="에포크 수")
-    parser.add_argument("--early_stopping_patience", type=int, default=10, help="Early stopping patience")
+    parser.add_argument("--batch_size", type=int, default=64, help="배치 크기")
+    parser.add_argument("--num_epochs", type=int, default=100, help="에포크 수")
+    parser.add_argument("--early_stopping_patience", type=int, default=20, help="Early stopping patience")
     parser.add_argument("--metrics_threshold", type=float, default=0.4, help="평가지표 계산 시 사용할 확률 임계값")
-    parser.add_argument("--pos_weight", type=float, default=10, help="클래스 불균형 보정을 위한 pos_weight")
+    parser.add_argument("--pos_weight", type=float, default=15, help="클래스 불균형 보정을 위한 pos_weight")
     # 모델
     parser.add_argument("--model_save_path", type=str, default="./models", help="모델 저장 경로")
     parser.add_argument("--model_save_name", type=str, default="predictor.pth", help="저장할 모델 파일 이름")
@@ -270,7 +320,8 @@ def main():
         gru_layers=args.gru_layers,
         dropout_rate=args.dropout_rate,
         prediction_head_inter_dim=args.prediction_head_inter_dim,
-        order_meta_dim=order_meta_dim
+        order_meta_dim=order_meta_dim,
+        pool_outsize=args.cnn_pool_size
     ).to(device)
 
     print("모델 초기화 완료.")

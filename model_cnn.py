@@ -11,7 +11,8 @@ class CNNPredictorModel(nn.Module):
                  gru_layers: int = 1,            # GRU 계층 수
                  dropout_rate: float = 0.1,      # FC, GRU 등에서의 dropout 확률
                  prediction_head_inter_dim: int = 128, # 최종 FC 레이어 중간 크기
-                 order_meta_dim: int = 5         # 주문 feature 벡터의 차원 (data_X_5.csv 기준)
+                 order_meta_dim: int = 5,         # 주문 feature 벡터의 차원 (data_X_5.csv 기준)
+                 pool_outsize: int = 8
                  ):
         super().__init__()
         self.product_emb_dim = product_emb_dim
@@ -29,11 +30,11 @@ class CNNPredictorModel(nn.Module):
                 padding=(cnn_kernel_size - 1) // 2    # 시퀀스 길이 보존용 패딩
             ),
             nn.ReLU(),
-            nn.AdaptiveMaxPool1d(output_size=1)       # (길이 차원) 평균/최대 Pool → 1개 벡터로
+            nn.AdaptiveMaxPool1d(output_size=pool_outsize)       # (길이 차원) 평균/최대 Pool → 1개 벡터로
         )
         # 여러 주문(시퀀스)들을 시간축 따라 처리하는 GRU (입력: 제품+주문메타 concat)
         self.order_sequence_gru = nn.GRU(
-            input_size=self.cnn_out_channels + order_meta_dim,  # 제품CNN+주문feature concat 후 입력
+            input_size=self.cnn_out_channels * pool_outsize + order_meta_dim,  # 제품CNN+주문feature concat 후 입력
             hidden_size=self.gru_hidden_dim,                    # GRU 은닉 상태 크기
             num_layers=gru_layers,
             batch_first=True,                                   # (B, 시퀀스, 벡터) 형태 사용
@@ -61,12 +62,12 @@ class CNNPredictorModel(nn.Module):
         cnn_input = product_x.view(batch_size * N_orders, max_products_per_order, self.product_emb_dim)
         cnn_input = cnn_input.permute(0, 2, 1)  # (B*N_orders, D_product, L)
 
-        # (2) CNN 적용: (B*N_orders, D_product, L) → (B*N_orders, cnn_out_channels, 1)
+        # (2) CNN 적용: (B*N_orders, D_product, L) → (B*N_orders, cnn_out_channels, pool_outsize)
         order_vectors_squeezed = self.order_encoder_cnn(cnn_input)
-        # 차원 축소: (B*N_orders, cnn_out_channels)
-        order_vectors = order_vectors_squeezed.squeeze(-1)
+        # pool_outsize 차원까지 flatten 후 GRU 입력 차원 맞추기
+        order_vectors = order_vectors_squeezed.flatten(start_dim=1)
         # (3) 주문 단위 시퀀스 복원: (B, N_orders, cnn_out_channels)
-        order_vecs = order_vectors.view(batch_size, N_orders, self.cnn_out_channels)
+        order_vecs = order_vectors.view(batch_size, N_orders, -1)
 
         # (4) 주문정보 feature와 concat: (B, N_orders, cnn_out_channels + D_meta)
         if meta_x is not None:

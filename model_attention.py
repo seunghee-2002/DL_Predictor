@@ -2,31 +2,36 @@ import torch
 import torch.nn as nn
 
 class AttentionPooling(nn.Module):
-    def __init__(self, input_dim, output_dim, num_heads=4):
+    def __init__(self, input_dim, output_dim, num_heads=4, num_queries=4):
         super().__init__()
-        # 하나의 learnable query가 전체 제품에 attention하여 세트(집합)을 1개 벡터로 압축
-        self.query = nn.Parameter(torch.randn(1, 1, input_dim))  # (1, 1, D)
-        # PyTorch MultiheadAttention: input=(B, L, D)
+        self.num_queries = num_queries
+        self.query = nn.Parameter(torch.randn(1, num_queries, input_dim))  # (1, Q, D)
         self.mha = nn.MultiheadAttention(embed_dim=input_dim, num_heads=num_heads, batch_first=True)
-        self.fc = nn.Linear(input_dim, output_dim)  # 출력 차원 변환
+        self.fc = nn.Linear(num_queries * input_dim, output_dim)  # optional: 압축
 
     def forward(self, x, mask=None):
-        # x: (B*N_orders, L, D) = 제품 시퀀스(주문별로 풀어서)
-        batch_size, seq_len, d = x.size()
-        q = self.query.expand(batch_size, -1, -1)  # (B*N_orders, 1, D), query 복제
+        # x: (B, L, D)
+        B, L, D = x.shape
+        q = self.query.expand(B, -1, -1)  # (B, Q, D)
+
         if mask is not None:
-            # mask: (B*N_orders, L) True=유효, False=패딩 → attn에서는 True=패딩!
             attn_mask = ~mask.bool()
         else:
             attn_mask = None
-        # MultiheadAttention 수행 (쿼리가 한 개라서 output shape: (B*N_orders, 1, D))
-        attn_output, _ = self.mha(q, x, x, key_padding_mask=attn_mask)
-        out = attn_output.squeeze(1)  # (B*N_orders, D)
-        return self.fc(out)           # (B*N_orders, output_dim)로 변환
+
+        attn_output, _ = self.mha(q, x, x, key_padding_mask=attn_mask)  # (B, Q, D)
+
+        #  평균 풀링 방식
+        # pooled = attn_output.mean(dim=1)  # (B, D)
+
+        #  FC 압축 방식 (선택)
+        pooled = self.fc(attn_output.reshape(B, -1))  # (B, Q*D) → (B, D_out)
+
+        return pooled
 
 class AttentionPredictorModel(nn.Module):
     def __init__(self,
-                 num_total_products: int,
+                 num_total_products: int= 49688,
                  product_emb_dim: int = 64,     # 제품 임베딩 차원
                  attn_out_dim: int = 128,       # attention 블록 출력 차원
                  attn_heads: int = 4,           # multi-head 수
@@ -50,7 +55,6 @@ class AttentionPredictorModel(nn.Module):
                 nhead=attn_heads,                   # 멀티헤드 수
                 batch_first=True,                   # (B, L, D) 포맷 지원
                 dim_feedforward=product_emb_dim * 2,# 내부 FFN 크기
-                dropout=dropout_rate,
                 activation='relu',
                 norm_first=True
             ) for _ in range(attn_layers)
@@ -94,7 +98,7 @@ class AttentionPredictorModel(nn.Module):
             )
         # (2) attention pooling → 주문별로 1개 벡터로 압축
         order_vecs = self.attn_pool(x_reshaped, mask=mask_reshaped)  # (B*N_orders, attn_out_dim)
-        order_vecs = order_vecs.view(batch_size, N_orders, self.attn_out_dim)  # (B, N_orders, attn_out_dim)
+        order_vecs = order_vecs.view(product_x.size(0), product_x.size(1), -1)
 
         # (3) 주문정보 feature와 concat → GRU 입력
         if meta_x is not None:
