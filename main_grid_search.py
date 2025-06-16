@@ -1,21 +1,29 @@
 import torch
 import numpy as np
-from torch.utils.data import DataLoader, random_split
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.data import DataLoader, random_split
 
 from config import Config
 from custom_dataset import OrderSequenceDataset, custom_collate_fn
 from model_cnn import CNNPredictorModel
 from model_attention import AttentionPredictorModel
-from utils import get_device
 from trainer import train_model
+from utils import get_device
 
-# 메인 실행 함수
-def main():
+# 실험 대상 손실 함수 목록
+loss_types = ["bce+bpr", "bce+margin", "bce"]
+
+# 실험 1회 실행 함수
+def run_experiment(loss_type):
+    print(f"\n===== [LOSS TYPE: {loss_type}] 실험 시작 =====")
+
+    # 설정 불러오기 및 손실 함수 설정
     config = Config()
+    config.loss_type = loss_type
+    config.model_save_name = f"predictor_{loss_type}.pth"
 
-    # 랜덤 시드 고정
+    # 시드 고정
     torch.manual_seed(config.seed)
     np.random.seed(config.seed)
     if torch.cuda.is_available():
@@ -24,7 +32,7 @@ def main():
     # 디바이스 설정
     device = get_device()
 
-    # 데이터셋 로딩
+    # 데이터셋 로드
     dataset = OrderSequenceDataset(
         data_x_product_path=config.data_x_product_path,
         data_y_path=config.data_y_path,
@@ -36,8 +44,6 @@ def main():
     )
 
     num_total_products = dataset.num_total_products
-
-    # 데이터 분할
     total_samples = len(dataset)
     train_size = int(0.6 * total_samples)
     val_size = int(0.2 * total_samples)
@@ -84,7 +90,7 @@ def main():
     else:
         raise ValueError(f"알 수 없는 모델 타입: {config.model_type}")
 
-    # 손실 함수 및 옵티마이저 정의
+    # 옵티마이저 설정
     optimizer = optim.Adam(model.parameters(), lr=config.learning_rate)
 
     # 학습 시작
@@ -100,5 +106,7 @@ def main():
         model_class=model_class
     )
 
+# 모든 손실 함수에 대해 반복 실행
 if __name__ == "__main__":
-    main()
+    for loss in loss_types:
+        run_experiment(loss)
