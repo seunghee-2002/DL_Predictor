@@ -12,3 +12,5 @@
 │
 ├── DLResource/              # 데이터 CSV, 임베딩 numpy 저장 위치
 └── models/                  # 학습된 모델 저장 디렉토리
+└── xgb/ 			# XGBoost baseline ML model 관련 디렉토리
+

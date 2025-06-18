@@ -1,0 +1,73 @@
+1. 실험 개요
+목적: 제품 시퀀스 기반 다음 주문 제품 예측
+
+기본 입력: 과거 주문 N개, 각 주문의 제품 목록
+
+모델 구조: CNN(제품 간 관계 인코딩) → GRU(주문 시퀀스 처리) → FC (제품 분류)
+
+평가 지표: F1_micro, Precision@10, Recall@10
+
+총 제품 수: 약 50,000개
+
+2. 모델 구조별 실험
+CNNGRU 미세 조정
+CNNGRU_1	cnn 128, kernel 4, pool 8, GRU 256, dropout 0.1, lr 0.0001
+CNNGRU_2	cnn 128, kernel 4, pool 8, GRU 256, dropout 0.2, lr 0.001
+CNNGRU_3	cnn 256, kernel 4, pool 8, GRU 256, dropout 0.1, lr 0.0005
+(사진 첨부)
+-> 학습률 0.001, dropout 0.2에서 성능 안정적
+
+3. Feature 제거
+이전의 주문 특징(주문 요일, 시간)을 넣지 않았을 때 f1micro가 0.13~이였는데 넣으니 0.12를 넘지 못해 제거하기로 판단
+제거 후 간단 조정
+CNN1	cnn 256, kernel 5, pool 16, GRU 256, dropout 0.2, lr 0.0005
+CNN2	cnn 256, kernel 4, pool 8, GRU 256, dropout 0.2, lr 0.0001
+(사진 첨부)
+-> CNN2가 안정적 -> kernel4, pool8
+
+4. 손실 함수 비교
+CNN2에서 학습률만 0.0005로 올린채 진행
+BCEWithLogitsLoss: 기본 기준
+(사진 첨부)
+
+BPR Loss: 단독 사용 시 학습 실패 (F1 ≈ 0)
+(사진 첨부)
+
+MarginRankingLoss: BPR로 학습이 안되는걸 확인해 비슷할거라 여겨 진행 X
+
+BCE + BPR : BCE단독보다 개선이 되지 않음
+(사진 첨부)
+
+BCE + Margin : Recall이 많이 감소했지만 Precision이 0.11 수준으로 최고점
+-> 정밀도는 높아졌지만, 추천(우리 모델의 의도)에는 Recall>Precision이라고 생각함
+
+혼합 손실 실험 결과: 혼합은 가능하지만, BCE 단독이 가장 안정적
+
+5. Self-Attention 실험
+주문 내 제품 간 관계를 Attention으로 모델링 시도
+
+구조: self-attention → pooling → GRU
+
+결과: F1_micro = 0.10 수준
+
+문제: Loss=NaN 발생 등 학습 불안정
+
+→ CNN이 더 안정적이고 효과적
+
+6. 추가 실험
+Dynamic Thresholding 도입 예정
+- 고정 임계값 0.4 대신 val set 기준으로 최적 threshold 선택
+
+출력 구조 전환 (Y: [L, D]) 제안
+모든 제품 logit 예측 대신, 추천 embedding 후보 (retrieval 방식)
+-> 완전히 다른 모델 + 손실 설계 필요
+
+ 7. 결론 요약
+Best 구조: CNN-GRU 기반 모델
+-Self-attention → 학습 불안정 or 성능 하락
+
+Best loss: BCEWithLogitsLoss 단독
+-BPR 단독/Ranking 단독 → 학습 실패
+-BPR/Ranking 혼합 -> 성능 하락
+
+추가 시도 중: Dynamic thresholding, retrieval 방식 전환

@@ -31,18 +31,18 @@ class Config:
 
     # GRU + FC 구조 설정 (공통)
     gru_hidden_dim: int = 256               # GRU hidden size
-    gru_layers: int = 2                     # GRU 레이어 수
+    gru_layers: int = 1                     # GRU 레이어 수
     dropout_rate: float = 0.2               # Dropout 비율
     prediction_head_inter_dim: int = 256    # FC 중간 hidden layer 크기
 
     # 학습 관련 하이퍼파라미터
-    learning_rate: float = 0.0005           # 학습률
-    batch_size: int = 64                    # 배치 사이즈
+    learning_rate: float = 0.001           # 학습률
+    batch_size: int = 32                    # 배치 사이즈
     num_epochs: int = 100                   # 에폭 수
     early_stopping_patience: int = 20       # 검증 성능이 향상되지 않을 때 기다릴 최대 epoch 수 (조기 종료 기준)
 
     # 손실 함수 관련
-    loss_type: str = "bce+margin"           # 손실 함수 설정: bce / bce+bpr / bce+margin (bpr, margin도 가능하지만 추천X)
+    loss_type: str = "bce"           # 손실 함수 설정: bce / bce+bpr / bce+margin
     pos_weight: float = 15.0                # BCEWithLogitsLoss용 positive class weight
     ranking_margin: float = 0.2             # ranking 손실의 margin 값
     ranking_weight: float = 0.1             # bce+ranking일 때 ranking 비중

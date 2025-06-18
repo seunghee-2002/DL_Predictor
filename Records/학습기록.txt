@@ -1,0 +1,68 @@
+CNN->GRU->(예측)구조
+
+CNN에 (B, N_orders(5), max_products_per_order(145), product_emb_dim(64))를 넣은 후
+(B * N, 64, 145)형태로 재가공해 CNN통과
+출력형태 (B * N, cnn_out_channels(ex.128))
+
+GRU에 (B, N, cnn_out_channels)로 변형한 후 통과
+마지막 GRU레이어의 은닉 상태(gru_hidden_dim(ex.512)) 사용
+출력형태 (B, gru_hidden_dim)
+
+FC
+gru_hidden_dim을 prediction_head_inter_dim(ex.256)으로 Linear
+Dropout후 각 제품에 대한 logits으로 출력
+
+손실함수:BCEWithLogitsLoss(pos_weight포함)
+옵티마이저:Adam
+--------------------------------------------------------------------------------------------------------
+위 구조로 학습을 진행한 best 모델
+
+하이퍼파라미터
+CNN 출력 차원 128 CNN 커널 크기 4 GRU 은닉 상태 차원 256
+GRU 계층 수 2 드롭아웃 비율 0.1 예측 헤드 중간 차원 256
+학습률 0.001 배치 크기 32
+구매로 판단할 확률 임계값 0.4 pos_weight 10
+
+최종 테스트 Loss: 0.0089, 테스트 지표: [F1_micro_overall: 0.1297, F1_macro: 0.0009, Precision@10: 0.1386, Recall@10: 0.1219, Precision@20: 0.1386, Recall@20: 0.1219]
+--------------------------------------------------------------------------------------------------------
+개선 진행결과
+
+원래 CNN Layer(벡터압축)에 dropout이 있었는데 예측률이 떨어진다고 판단->제거
+
+-제품임베딩벡터 차원조절해보기
+16차원
+[F1_micro_overall: 0.1295, F1_macro: 0.0012, Precision@10: 0.1329, Recall@10: 0.1262, Precision@20: 0.1329, Recall@20: 0.1262]
+32차원
+[F1_micro_overall: 0.1331, F1_macro: 0.0011, Precision@10: 0.1467, Recall@10: 0.1218, Precision@20: 0.1467, Recall@20: 0.1218]
+64차원
+[F1_micro_overall: 0.1297, F1_macro: 0.0009, Precision@10: 0.1386, Recall@10: 0.1219, Precision@20: 0.1386, Recall@20: 0.1219]
+-> 성능에 유의미한 향상이 있다고 보기 힘듬(32차원사용)
+
+-CNN만으로는 kernel_size(제품간 관계를 보는 단위)의 한계(멀리 떨어진 제품과 관계가 있을 수 있음)가 있다고 생각
+-> 각 주문을 CNN대신 Multi-Head Self-Attention + Attention Pooling으로 압축 후 GRU -> 최종 예측 진행
+빠진 하이퍼파라미터:CNN 출력 차원, CNN 커널 크기
+추가된 하이퍼파라미터:Attention 출력 차원 128, Attention 헤드 수 4, Attention block Layer 수 1
+[F1_micro_overall: 0.1013, F1_macro: 0.0002, Precision@10: 0.1245, Recall@10: 0.0854, Precision@20: 0.1245, Recall@20: 0.0854]
+-> cnn이 더 효과적
+
+-고객의 주문 정보가 들어가지 않고 제품 목록만 들어가니 예측률이 떨어진다고 판단
+-> 주문 정보도 GRU에 투입
+Attention[F1_micro_overall: 0.1008, F1_macro: 0.0002, Precision@10: 0.1277, Recall@10: 0.0833, Precision@20: 0.1277, Recall@20: 0.0833]
+CNN[F1_micro_overall: 0.1204, F1_macro: 0.0007, Precision@10: 0.1324, Recall@10: 0.1103, Precision@20: 0.1324, Recall@20: 0.1103] 
+-> 오히려 F1_micro_overall가 내려감
+--------------------------------------------------------------------------------------------------------
+self-attention으로 주문 내 제품 상호관계 파악 -> attention pooling으로 요약 -> transformer로 주문 시퀀스 모델링 
+-> 학습을 하려고 했으나 계속 Loss = Nan, f1score = 0.0000 등 학습이 되지 않음 (포기)
+
+-모든 제품(49688)에 대해 확률을 표현하는것보다 후보군(top 3000)을 추려서 출력하는게 메모리, 학습 속도, 성능 안정성에서 유리하다고 판단
+-> 학습 때마다 일일이 cosine similarity로 후보군을 추리는건 학습이 너무 느려서 미리 주문 당 후보군을 추려놓는 방법도 있겠으나 비효율적
+-> 최종 평가 시에만 적용
+
+-현재 손실함수를 BCEWithLogitsLoss로 하는데 Task를 구매 가능한 제품을 추천하는 방향으로 보면 
+PairwiseRankingLoss나 BCE와 PairwiseRanking을 섞는것도 고려
+-> BCEWithLogitsLoss, BPRLoss, MarginRankingLoss를 사용해봤음
+그런데 BPR 단독 사용시 학습이 제대로 되지않음(pos_weight부재때문으로 추정) -> BCE와 혼합해 사용
+총 3개의 옵션으로 Grid Search (BCE, BCE + BPR, BCE + Margin)
+-> 성능(f1micro기준)이 bce > bce + bpr > bce + margin 순서로 나옴
+--------------------------------------------------------------------------------------------------------
+
