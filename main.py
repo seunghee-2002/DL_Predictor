@@ -29,7 +29,6 @@ def main():
         data_x_product_path=config.data_x_product_path,
         data_y_path=config.data_y_path,
         embeddings_npy_path=config.embeddings_path,
-        products_path=config.products_path,
         N_orders=config.N_orders,
         max_products_per_order=config.max_products_per_order,
         embedding_dim=config.product_emb_dim

@@ -9,7 +9,6 @@ class OrderSequenceDataset(Dataset):
                  data_x_product_path,
                  data_y_path,
                  embeddings_npy_path,
-                 products_path,
                  N_orders,
                  max_products_per_order,
                  embedding_dim=64):
@@ -24,11 +23,6 @@ class OrderSequenceDataset(Dataset):
 
         # 제품 임베딩 (numpy: [num_products, emb_dim])
         self.product_embeddings_all = np.load(embeddings_npy_path)
-
-        # 제품 ID → 임베딩 인덱스 매핑
-        products_df = pd.read_csv(products_path)
-        self.product_id_to_idx_map = {pid: i for i, pid in enumerate(products_df['product_id'])}
-        self.num_total_products = len(products_df)
 
         # 샘플 단위로 입력 시퀀스 및 타겟 구성
         x_prod_grouped = x_prod_df.groupby('index')
